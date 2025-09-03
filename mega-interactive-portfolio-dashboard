@@ -1,0 +1,297 @@
+# mega_portfolio_full_polished.py
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+from textblob import TextBlob
+from collections import OrderedDict
+import tempfile
+import subprocess
+import ast
+import os
+
+# -------------------------------
+# Redis Mini Implementation
+# -------------------------------
+class RedisMini:
+    def __init__(self, capacity=5, name="Cache", replica=None):
+        self.capacity = capacity
+        self.cache = OrderedDict()
+        self.replica = replica
+        self.name = name
+
+    def put(self, key, value):
+        if key in self.cache:
+            self.cache.pop(key)
+        elif len(self.cache) >= self.capacity:
+            self.cache.popitem(last=False)
+        self.cache[key] = value
+        if self.replica:
+            self.replica.put_replica(key, value)
+
+    def put_replica(self, key, value):
+        if key in self.cache:
+            self.cache.pop(key)
+        elif len(self.cache) >= self.capacity:
+            self.cache.popitem(last=False)
+        self.cache[key] = value
+
+    def get(self, key):
+        if key not in self.cache:
+            return None
+        val = self.cache.pop(key)
+        self.cache[key] = val
+        return val
+
+    def delete(self, key):
+        if key in self.cache:
+            self.cache.pop(key)
+        if self.replica:
+            self.replica.delete_replica(key)
+
+    def delete_replica(self, key):
+        if key in self.cache:
+            self.cache.pop(key)
+
+    def display(self):
+        return dict(self.cache)
+
+# -------------------------------
+# Session State Initialization
+# -------------------------------
+def init_state():
+    if 'theme' not in st.session_state:
+        st.session_state.theme = "Light"
+    if 'DAU' not in st.session_state:
+        st.session_state.DAU = np.random.randint(1000,1500)
+    if 'MAU' not in st.session_state:
+        st.session_state.MAU = np.random.randint(4000,6000)
+    if 'ARPU' not in st.session_state:
+        st.session_state.ARPU = np.random.uniform(8,15)
+    if 'cache_hits' not in st.session_state:
+        st.session_state.cache_hits = np.random.randint(50,150)
+    if 'sentiment' not in st.session_state:
+        st.session_state.sentiment = {"Positive":60,"Neutral":25,"Negative":15}
+    if 'leaderboard' not in st.session_state:
+        st.session_state.leaderboard = pd.DataFrame({"Username":["User1","User2","User3"],
+                                                     "Score":[100,90,80]})
+    if 'submission_trends' not in st.session_state:
+        st.session_state.submission_trends = pd.DataFrame({
+            "date": pd.date_range(end=pd.Timestamp.today(), periods=7),
+            "submissions": np.random.randint(5,20,7),
+            "success": np.random.randint(3,15,7)
+        })
+    if 'cache_metrics' not in st.session_state:
+        st.session_state.cache_metrics = pd.DataFrame({
+            "time": pd.date_range(end=pd.Timestamp.now(), periods=10, freq='T'),
+            "primary_size": np.random.randint(1,6,10),
+            "replica_size": np.random.randint(1,6,10)
+        })
+    if 'primary_cache' not in st.session_state:
+        st.session_state.replica_cache = RedisMini(capacity=5,name="Replica")
+        st.session_state.primary_cache = RedisMini(capacity=5,name="Primary",replica=st.session_state.replica_cache)
+
+init_state()
+
+# -------------------------------
+# Theme Colors
+# -------------------------------
+st.sidebar.subheader("Settings")
+st.session_state.theme = st.sidebar.radio("Select Theme", ["Light","Dark"])
+if st.session_state.theme=="Light":
+    bg_color = "#FFFFFF"
+    text_color = "#000000"
+    positive_color = "#2ca02c"
+    negative_color = "#d62728"
+else:
+    bg_color = "#0e1117"
+    text_color = "#FFFFFF"
+    positive_color = "#00ff7f"
+    negative_color = "#ff6347"
+
+st.set_page_config(page_title="Pro SaaS Portfolio", layout="wide")
+st.markdown(f"<div style='background-color:{bg_color}; color:{text_color}; padding:10px; border-radius:10px'>"
+            f"<h1>🚀 AI & Analytics Mega Portfolio</h1></div>", unsafe_allow_html=True)
+
+# -------------------------------
+# Sidebar Navigation
+# -------------------------------
+menu = ["Home","Player Analytics","Monetization & A/B Testing","NLP Player Reviews",
+        "Mini LeetCode","Redis Mini Cache","AI Code Reviewer"]
+choice = st.sidebar.selectbox("Navigate Projects", menu)
+
+# -------------------------------
+# Home Page + Dashboard Overview
+# -------------------------------
+if choice=="Home":
+    st.subheader("📊 Dashboard Overview")
+    col1,col2,col3 = st.columns(3)
+    col1.metric("DAU", st.session_state.DAU, "↗ +5%")
+    col1.metric("MAU", st.session_state.MAU, "↗ +3%")
+    col2.metric("ARPU ($)", round(st.session_state.ARPU,2), f"↗ +2%")
+    col2.metric("Cache Hits", st.session_state.cache_hits, f"↗ +4%")
+    col3.metric("Top User Score", st.session_state.leaderboard['Score'].max())
+    col3.metric("Sentiment Positive %", st.session_state.sentiment["Positive"])
+
+    st.markdown("---")
+    st.subheader("📈 Submission Trends")
+    fig = px.line(st.session_state.submission_trends, x="date", y="submissions", title="Daily Submissions",
+                  color_discrete_sequence=[positive_color])
+    st.plotly_chart(fig,use_container_width=True)
+
+    st.subheader("🗄 Cache Metrics Over Time")
+    fig_cache = px.line(st.session_state.cache_metrics, x="time", y=["primary_size","replica_size"],
+                        title="Cache Sizes (Primary vs Replica)",
+                        color_discrete_sequence=[positive_color, negative_color])
+    st.plotly_chart(fig_cache,use_container_width=True)
+
+    st.subheader("🏆 Leaderboard")
+    st.dataframe(st.session_state.leaderboard.sort_values(by="Score",ascending=False))
+
+    st.markdown("---")
+    st.subheader("Projects")
+    projects = [
+        {"name":"Player Analytics","desc":"DAU/MAU, churn insights","emoji":"📊"},
+        {"name":"Monetization & A/B Testing","desc":"ARPU/LTV optimization","emoji":"💰"},
+        {"name":"NLP Player Reviews","desc":"Sentiment & topic modeling","emoji":"📝"},
+        {"name":"Mini LeetCode","desc":"Online judge + sandbox","emoji":"💻"},
+        {"name":"Redis Mini Cache","desc":"In-memory cache LRU/replica","emoji":"🗄"},
+        {"name":"AI Code Reviewer","desc":"Syntax + inefficiency hints","emoji":"🤖"}
+    ]
+    cols = st.columns(3)
+    for i,p in enumerate(projects):
+        with cols[i%3]:
+            st.markdown(f"<div style='background-color:#f0f2f6; padding:15px; border-radius:10px'>"
+                        f"<h3>{p['emoji']} {p['name']}</h3>"
+                        f"<p>{p['desc']}</p></div>", unsafe_allow_html=True)
+            if st.button(f"Go → {p['name']}", key=p['name']):
+                st.experimental_rerun()
+
+# -------------------------------
+# Player Analytics
+# -------------------------------
+elif choice=="Player Analytics":
+    st.header("📊 Player Behavior Analytics")
+    st.metric("DAU", st.session_state.DAU)
+    st.metric("MAU", st.session_state.MAU)
+    st.metric("DAU/MAU Ratio", f"{st.session_state.DAU/st.session_state.MAU:.2%}")
+    churn_rate = 0.15
+    st.write(f"Predicted Churn Rate: {churn_rate*100:.1f}%")
+    trend_data = pd.DataFrame({"date": pd.date_range(end=pd.Timestamp.today(), periods=30),
+                               "DAU": np.random.randint(1000,1300,30)})
+    fig = px.line(trend_data,x="date",y="DAU",title="DAU Trend",color_discrete_sequence=[positive_color])
+    st.plotly_chart(fig,use_container_width=True)
+
+# -------------------------------
+# Monetization & A/B Testing
+# -------------------------------
+elif choice=="Monetization & A/B Testing":
+    st.header("💰 Game Monetization Simulator")
+    num_players = 500
+    mean_a = st.slider("Variant A ARPU",5,20,10)
+    mean_b = st.slider("Variant B ARPU",5,20,12)
+    arpu_a = np.random.normal(mean_a,5,num_players)
+    arpu_b = np.random.normal(mean_b,5,num_players)
+    st.write("Variant A Mean ARPU:", round(np.mean(arpu_a),2))
+    st.write("Variant B Mean ARPU:", round(np.mean(arpu_b),2))
+    fig = px.box(pd.DataFrame({'ARPU': np.concatenate([arpu_a,arpu_b]),
+                               'Variant': ['A']*num_players + ['B']*num_players}),
+                 x='Variant',y='ARPU',color='Variant',title="ARPU Distribution")
+    st.plotly_chart(fig,use_container_width=True)
+
+# -------------------------------
+# NLP Player Reviews
+# -------------------------------
+elif choice=="NLP Player Reviews":
+    st.header("📝 NLP Insights from Player Reviews")
+    reviews = ["Great game","Too many ads","Loved graphics","Crashes often","Amazing rewards"]
+    data = pd.DataFrame({'review': np.random.choice(reviews,200)})
+    data['polarity'] = data['review'].apply(lambda x: TextBlob(x).sentiment.polarity)
+    data['sentiment'] = data['polarity'].apply(lambda x:'Positive' if x>0 else ('Negative' if x<0 else 'Neutral'))
+    fig = px.pie(data['sentiment'].value_counts().reset_index(), names='index', values='sentiment',
+                 color_discrete_sequence=[positive_color, negative_color, "#ff7f0e"])
+    st.plotly_chart(fig)
+    st.subheader("Sample Reviews")
+    st.dataframe(data.head(10))
+
+# -------------------------------
+# Mini LeetCode
+# -------------------------------
+elif choice=="Mini LeetCode":
+    st.header("💻 Mini LeetCode Sandbox")
+    problems = ["Problem 1","Problem 2","Problem 3"]
+    st.subheader("Problem Set")
+    st.table(problems)
+    username = st.text_input("Username:", key="leetcode_user")
+    code_input = st.text_area("Python code here:",height=150)
+    if st.button("Run Code", key="leetcode"):
+        if code_input.strip()!="" and username.strip()!="":
+            with tempfile.NamedTemporaryFile(delete=False,suffix=".py") as tmp:
+                tmp.write(code_input.encode())
+                tmp_path = tmp.name
+            try:
+                result = subprocess.run(['python',tmp_path],capture_output=True,timeout=3)
+                output = result.stdout.decode() + result.stderr.decode()
+                st.code(output)
+                score = np.random.randint(50,200)
+                st.session_state.leaderboard = pd.concat([st.session_state.leaderboard,
+                                                          pd.DataFrame({"Username":[username],"Score":[score]})],
+                                                          ignore_index=True)
+                today = pd.Timestamp.today().normalize()
+                if today in st.session_state.submission_trends['date'].values:
+                    st.session_state.submission_trends.loc[
+                        st.session_state.submission_trends['date']==today,"submissions"] +=1
+                    st.session_state.submission_trends.loc[
+                        st.session_state.submission_trends['date']==today,"success"] +=1
+                else:
+                    st.session_state.submission_trends = pd.concat([
+                        st.session_state.submission_trends,
+                        pd.DataFrame({"date":[today],"submissions":[1],"success":[1]})
+                    ])
+            except subprocess.TimeoutExpired:
+                st.error("Execution Timeout!")
+            finally:
+                os.remove(tmp_path)
+
+# -------------------------------
+# Redis Mini Cache
+# -------------------------------
+elif choice=="Redis Mini Cache":
+    st.header("🗄 Redis Mini Cache")
+    primary = st.session_state.primary_cache
+    replica = st.session_state.replica_cache
+    op = st.selectbox("Operation",["PUT","GET","DELETE"])
+    key = st.text_input("Key", key="redis_key")
+    value = st.text_input("Value", key="redis_val")
+    if st.button("Execute", key="redis_btn"):
+        if op=="PUT": primary.put(key,value)
+        elif op=="GET": st.write(f"GET {key}: {primary.get(key)}")
+        elif op=="DELETE": primary.delete(key)
+        st.session_state.cache_metrics = pd.concat([
+            st.session_state.cache_metrics,
+            pd.DataFrame({"time":[pd.Timestamp.now()],
+                          "primary_size":[len(primary.cache)],
+                          "replica_size":[len(replica.cache)]})
+        ], ignore_index=True)
+    st.write("Primary Cache:", primary.display())
+    st.write("Replica Cache:", replica.display())
+    fig_cache = px.line(st.session_state.cache_metrics, x="time", y=["primary_size","replica_size"],
+                        title="Cache Sizes (Primary vs Replica)",
+                        color_discrete_sequence=[positive_color, negative_color])
+    st.plotly_chart(fig_cache,use_container_width=True)
+
+# -------------------------------
+# AI Code Reviewer
+# -------------------------------
+elif choice=="AI Code Reviewer":
+    st.header("🤖 AI Code Reviewer")
+    code_review_input = st.text_area("Paste Python code:",height=150,key="review_input")
+    if st.button("Review Code", key="review_btn"):
+        if code_review_input.strip()!="":
+            try:
+                ast.parse(code_review_input)
+                st.success("✅ Syntax OK")
+            except SyntaxError as e:
+                st.error(f"Syntax Error: {e}")
+            st.info("⚠️ Suggestion: Use list comprehensions instead of loops with append.")
+            st.info("💡 Suggestion: Add docstrings to functions for readability.")
